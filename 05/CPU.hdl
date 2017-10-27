@@ -1,0 +1,95 @@
+// This file is part of www.nand2tetris.org
+// and the book "The Elements of Computing Systems"
+// by Nisan and Schocken, MIT Press.
+// File name: projects/05/CPU.hdl
+
+/**
+ * The Hack CPU (Central Processing unit), consisting of an ALU,
+ * two registers named A and D, and a program counter named PC.
+ * The CPU is designed to fetch and execute instructions written in 
+ * the Hack machine language. In particular, functions as follows:
+ * Executes the inputted instruction according to the Hack machine 
+ * language specification. The D and A in the language specification
+ * refer to CPU-resident registers, while M refers to the external
+ * memory location addressed by A, i.e. to Memory[A]. The inM input 
+ * holds the value of this location. If the current instruction needs 
+ * to write a value to M, the value is placed in outM, the address 
+ * of the target location is placed in the addressM output, and the 
+ * writeM control bit is asserted. (When writeM==0, any value may 
+ * appear in outM). The outM and writeM outputs are combinational: 
+ * they are affected instantaneously by the execution of the current 
+ * instruction. The addressM and pc outputs are clocked: although they 
+ * are affected by the execution of the current instruction, they commit 
+ * to their new values only in the next time step. If reset==1 then the 
+ * CPU jumps to address 0 (i.e. pc is set to 0 in next time step) rather 
+ * than to the address resulting from executing the current instruction. 
+ */
+
+CHIP CPU {
+
+    IN  inM[16],         // M value input  (M = contents of RAM[A])
+        instruction[16], // Instruction for execution
+        reset;           // Signals whether to re-start the current
+                         // program (reset==1) or continue executing
+                         // the current program (reset==0).
+
+    OUT outM[16],        // M value output
+        writeM,          // Write to M? 
+        addressM[15],    // Address in data memory (of M)
+        pc[15];          // address of next instruction
+
+    PARTS:
+    // Input for A register
+    Not(in=instruction[15], out=s1);
+    Mux16(a=outALU, b=instruction, sel=s1, out=inA);
+
+    // A register
+    Mux(a=true, b=instruction[5], sel=instruction[15], out=loadA);
+    ARegister(in=inA, load=loadA, out=outA, out[0..14]=addressM);
+
+    // D register
+    Mux(a=false, b=instruction[4], sel=instruction[15], out=loadD);
+    DRegister(in=outALU, load=loadD, out=inALU1);
+
+    // Select A or M for second ALU input (first is always from D)
+    Mux(a=false, b=instruction[12], sel=instruction[15], out=s2);
+    Mux16(a=outA, b=inM, sel=s2, out=inALU2);
+
+    // ALU
+    // 6 Control bits: c1 - c6
+    // For C-instruction, control bits are instruction[11..6]
+    // for A-instruction, they will be 101010, means we make ALU compute constant 0
+    Mux(a=true,  b=instruction[11], sel=instruction[15], out=c1);
+    Mux(a=false, b=instruction[10], sel=instruction[15], out=c2);
+    Mux(a=true,  b=instruction[9],  sel=instruction[15], out=c3);
+    Mux(a=false, b=instruction[8],  sel=instruction[15], out=c4);
+    Mux(a=true,  b=instruction[7],  sel=instruction[15], out=c5);
+    Mux(a=false, b=instruction[6],  sel=instruction[15], out=c6);
+
+    // Compute outM
+    ALU(x=inALU1, y=inALU2, zx=c1, nx=c2, zy=c3, ny=c4, f=c5, no=c6,
+        out=outM, out=outALU, zr=zr, ng=ng);
+    
+    // Set writeM
+    Mux(a=false, b=instruction[3], sel=instruction[15], out=writeM);
+
+    // Program counter //
+    // Jump for C-instruction
+    DMux(in=true, sel=zr, a=jne, b=jeq);
+    DMux(in=true, sel=ng, a=jge, b=jlt);
+    Or(a=jeq, b=jlt, out=jle);
+    Not(in=jle, out=jgt);
+    Mux(a=false, b=jgt,  sel=instruction[0], out=m1);
+    Mux(a=jeq,   b=jge,  sel=instruction[0], out=m2);
+    Mux(a=jlt,   b=jne,  sel=instruction[0], out=m3);
+    Mux(a=jle,   b=true, sel=instruction[0], out=m4);
+    Mux(a=m1,    b=m2,   sel=instruction[1], out=m5);
+    Mux(a=m3,    b=m4,   sel=instruction[1], out=m6);
+    Mux(a=m5,    b=m6,   sel=instruction[2], out=m7);
+
+    // Load for PC
+    Mux(a=false, b=m7, sel=instruction[15], out=pcload);
+
+    // PC
+    PC(in=outA, load=pcload, reset=reset, inc=true, out[0..14]=pc);
+}
